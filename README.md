@@ -4,7 +4,7 @@
 Summary
 Managing thousands of invoices manually is costly, slow, and error-prone. By leveraging AWS services, MCP (Model Context Protocol), and a multi-agent approach, we can progressively evolve from a simple invoice pipeline into a scalable, AI-driven system. Here’s a 3-phase journey:
 
-Phase 1: Baseline Invoice Processing
+Phase 1: Baseline Invoice Processing without any AI 
 
 We begin with a simple but working pipeline: upload invoices, extract data, and store results.
 
@@ -12,45 +12,49 @@ We begin with a simple but working pipeline: upload invoices, extract data, and 
 🔹 Tech stack: FastAPI, Boto3, DynamoDB, custom parser
 🔹 Output: Vendor, totals, and line items in a clean JSON schema
 
-Phase 2: With MCP Server
+        (User / System Upload)
+                  │
+                  ▼
+        ┌─────────────────────┐
+        │   S3 Raw Bucket     │   invoices/raw/YYYY/MM/DD/<file>.pdf
+        └────────┬────────────┘
+                 │ S3:ObjectCreated
+                 ▼
+        ┌─────────────────────┐
+        │ InvoiceProcessorFn  │  (src/s3_trigger/handler.py)
+        │  - Textract call    │  analyze_expense
+        │  - parse → JSON     │  src/common/parser.py
+        │  - write outputs    │  src/common/process.py
+        └────────┬────────────┘
+                 │
+     writes JSON │                      writes item
+                 ▼                               ▼
+        ┌─────────────────────┐        ┌──────────────────────┐
+        │ S3 Processed Bucket │        │  DynamoDB: Invoices  │
+        │ invoices/processed/ │        │  invoice_id (HASH)   │
+        └─────────────────────┘        └──────────────────────┘
 
-Now we introduce MCP to centralize and standardize AWS tool access. Instead of every client embedding AWS SDK code, they call MCP tools like s3_put_object and textract_analyze_expense.
 
-🔹 Flow: Web → MCP Server → S3 / Textract / DynamoDB
-🔹 Tech stack: MCP server, AWS tools exposed as APIs
-🔹 Benefits: Tool reuse, schema safety, centralized IAM, easy integration with LLMs
-
-Phase 3: Multi-Agent System on AWS
-
-Finally, we evolve into a multi-agent workflow where specialized agents collaborate: ingestion, OCR, parsing, validation, enrichment, persistence, and exception handling. Orchestration is done with AWS Step Functions.
-
-🔹 Flow: Web → Multi-Agent System → DynamoDB
-🔹 Tech stack: Step Functions, SQS, Bedrock for enrichment, agents as Lambdas
-🔹 Capabilities: Parallel processing, validation checks, vendor normalization, audit logs, exception routing
-
-👉 This journey shows how to start small, add modularity with MCP, and scale into a robust AI-powered invoice processing system.
+             (Nightly / On-demand)
+                  │
+       EventBridge Rule (cron)
+                  │
+                  ▼
+        ┌─────────────────────┐    lists: invoices/raw/YYYY/MM/DD/
+        │   DailyBatchFn      │ -> process_one_object(...) per key
+        │ (src/daily_batch/   │    same pipeline as above
+        │  handler.py)        │
+        └─────────────────────┘
 
 
+-----------------------------------Basic setup and Comamnds-----------------------------------------
 
 # Copy .env file and rename it :
 cp .env.example .env
 
-# Create a AWS profile 
-
-AWS_PROFILE=demo
-
-RAW_BUCKET=invoices-raw--unique ID
-PROCESSED_BUCKET=invoices-processed-unique ID
-
-# SAM stack name
-STACK_NAME=invoice-phase1-prod
-
-# App settings
-TIMEZONE=America/Chicago
-DAILY_BATCH_CRON=cron(0 1 * * ? *)
 
 
-Different AWS profile check commands locally:
+# Different AWS profile check commands locally:
 
 aws configure list-profiles
 aws sts get-caller-identity --profile demo
@@ -60,14 +64,14 @@ aws s3api list-buckets --profile demo
 This worked for deploymnent and tml was created.
 # load env (if you’re using .env)      
 set -a; source .env; set +a
-
 sam deploy --guided --region "$AWS_DEFAULT_REGION" --profile "$AWS_PROFILE"
 
 # push data files:
 make seed
 
-# validate pushed files
 
+
+# validate pushed files 
 # set once per shell
 export AWS_PROFILE=demo
 export AWS_DEFAULT_REGION=us-east-1
@@ -83,7 +87,6 @@ aws s3 ls "s3://$RAW_BUCKET/$P/" --recursive --human-readable --summarize
 
 # check processed files:
 export PROCESSED_BUCKET=invoice-processed--sandeepsingh-2025-10-04
-
 aws s3 ls "s3://$PROCESSED_BUCKET/invoices/processed/$Y/$M/$D/" \
   --recursive --human-readable --summarize
 
@@ -98,10 +101,10 @@ aws cloudformation describe-stack-resources \
   --stack-name invoice-phase1-prod --region $AWS_DEFAULT_REGION --profile $AWS_PROFILE \
   --query "StackResources[?ResourceType=='AWS::Lambda::Function'].[LogicalResourceId,PhysicalResourceId]" \
   --output table
-
 # Replace <physical-fn-name> with the S3-trigger lambda you see above (InvoiceProcessorFn)
 aws logs describe-log-groups --region $AWS_DEFAULT_REGION --profile $AWS_PROFILE \
   --query "logGroups[?contains(logGroupName, '<physical-fn-name>')].logGroupName" --output text
+
 
 # Tail the latest logs (use the log group from the previous command)
 aws logs tail "/aws/lambda/<physical-fn-name>" --follow --since 30m \
@@ -109,7 +112,6 @@ aws logs tail "/aws/lambda/<physical-fn-name>" --follow --since 30m \
 
 
 # running daily batch manually
-
 # Get the batch function name
 aws cloudformation describe-stack-resource \
   --stack-name invoice-phase1-prod --logical-resource-id DailyBatchFn \
@@ -118,7 +120,6 @@ aws cloudformation describe-stack-resource \
 
   example output from above -> invoice-phase1-prod-DailyBatchFn-6cqr4XD2EPeW
 plug this in below command for <daily-batch-physical-name>
-
 # Invoke it (replace function name below)
 aws lambda invoke --function-name <daily-batch-physical-name> /tmp/out.json \
   --region $AWS_DEFAULT_REGION --profile $AWS_PROFILE && cat /tmp/out.json
@@ -131,6 +132,8 @@ aws cloudformation describe-stack-resources \
   --region us-east-1 --profile demo \
   --query "StackResources[?ResourceType=='AWS::Lambda::Function'].[LogicalResourceId,PhysicalResourceId]" \
   --output table
+
+
 
   |                           DescribeStackResources                            |
 +---------------------+-------------------------------------------------------+
@@ -146,6 +149,9 @@ aws logs tail "/aws/lambda/invoice-phase1-prod-InvoiceProcessorFn-CQwwRCvZpDWu" 
   --since 30m --follow \
   --region us-east-1 --profile demo
 
+
+
+Output: 
 Db entries:
   -------------------------------------------------------------------------------------------------
 |                                             Scan                                              |
