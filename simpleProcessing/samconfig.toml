@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "invoice-phase1-prod"
+resolve_s3 = true
+s3_prefix = "invoice-phase1-prod"
+region = "us-east-1"
+profile = "demo"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "RawBucketName=\"invoices-raw--sandeepsingh-2025-10-04\" ProcessedBucketName=\"invoice-processed--sandeepsingh-2025-10-04\" TableName=\"Invoices\" RegionParam=\"us-east-1\" Timezone=\"America/Chicago\" DailyBatchCron=\"cron(0 1 * * ? *)\""
+image_repositories = []

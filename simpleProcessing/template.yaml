@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Prod-style Phase 1 Invoice Processing (S3 -> Lambda -> Textract -> S3/DynamoDB) + Daily Batch
+
+Parameters:
+  RawBucketName:
+    Type: String
+    Description: S3 bucket for raw uploads (must be globally unique)
+  ProcessedBucketName:
+    Type: String
+    Description: S3 bucket for processed outputs (must be globally unique)
+  TableName:
+    Type: String
+    Default: Invoices
+  RegionParam:
+    Type: String
+    Default: us-east-1
+  Timezone:
+    Type: String
+    Default: America/Chicago
+    Description: IANA timezone (for daily batch "today")
+  DailyBatchCron:
+    Type: String
+    Default: cron(0 1 * * ? *) # 01:00 UTC daily
+    Description: EventBridge cron for daily batch (adjust to your needs)
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 120
+    MemorySize: 1536
+    Tracing: Active
+    Environment:
+      Variables:
+        RAW_BUCKET: !Ref RawBucketName
+        PROCESSED_BUCKET: !Ref ProcessedBucketName
+        DDB_TABLE: !Ref TableName
+        TIMEZONE: !Ref Timezone
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref RawBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: { Status: Enabled }
+
+  ProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ProcessedBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: { Status: Enabled }
+
+  InvoicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: invoice_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: invoice_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  InvoiceProcessorFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: s3_trigger/handler.handler
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref RawBucketName }
+        - S3WritePolicy: { BucketName: !Ref ProcessedBucketName }
+        - DynamoDBCrudPolicy: { TableName: !Ref TableName }
+        - Statement:
+            Effect: Allow
+            Action: [ "textract:AnalyzeExpense" ]
+            Resource: "*"
+      Events:
+        RawUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawBucket
+            Events: s3:ObjectCreated:*
+
+  DailyBatchFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: daily_batch/handler.handler
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref RawBucketName }
+        - S3WritePolicy: { BucketName: !Ref ProcessedBucketName }
+        - DynamoDBCrudPolicy: { TableName: !Ref TableName }
+        - Statement:
+            Effect: Allow
+            Action: [ "textract:AnalyzeExpense" ]
+            Resource: "*"
+
+  DailyBatchRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: !Ref DailyBatchCron
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DailyBatchFn.Arn
+          Id: DailyBatchFnTarget
+
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DailyBatchFn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyBatchRule.Arn
