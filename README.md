@@ -4,6 +4,13 @@
 Summary
 Managing thousands of invoices manually is costly, slow, and error-prone. By leveraging AWS services, MCP (Model Context Protocol), and a multi-agent approach, we can progressively evolve from a simple invoice pipeline into a scalable, AI-driven system. Here’s a 3-phase journey:
 
+Phase 2 : AI model assisted Invoice Processing
+
+
+< COMING SOON >
+
+
+
 Phase 1: Baseline Invoice Processing without any AI 
 
 We begin with a simple but working pipeline: upload invoices, extract data, and store results.
