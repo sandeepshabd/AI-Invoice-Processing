@@ -5,17 +5,7 @@ build:
 	sam build
 
 deploy: build
-	sam deploy --debug \
-	  --stack-name $(STACK_NAME) \
-	  --resolve-s3 \
-	  --capabilities CAPABILITY_IAM \
-	  --parameter-overrides \
-	    ParameterKey=RawBucketName,ParameterValue=$(RAW_BUCKET) \
-	    ParameterKey=ProcessedBucketName,ParameterValue=$(PROCESSED_BUCKET) \
-	    ParameterKey=TableName,ParameterValue=$(TABLE_NAME) \
-	    ParameterKey=Timezone,ParameterValue=$(TIMEZONE) \
-	    ParameterKey=DailyBatchCron,ParameterValue=$(DAILY_BATCH_CRON) \
-	  --region $(AWS_DEFAULT_REGION) --profile $(AWS_PROFILE)
+	sam deploy --guided --debug 
 
 
 outputs:

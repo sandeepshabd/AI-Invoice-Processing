@@ -21,7 +21,7 @@ Parameters:
     Description: IANA timezone (for daily batch "today")
   DailyBatchCron:
     Type: String
-    Default: cron(0 1 * * ? *) # 01:00 UTC daily
+    Default: "cron(0 1 * * ? *)" # 01:00 UTC daily
     Description: EventBridge cron for daily batch (adjust to your needs)
 
 Globals:
