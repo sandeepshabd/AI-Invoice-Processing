@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Prod-style Phase 2 Invoice Processing with AI Model
+
+Parameters:
+  RawBucketName:
+    Type: String
+    Description: S3 bucket for raw uploads (must be globally unique)
+  ProcessedBucketName:
+    Type: String
+    Description: S3 bucket for processed outputs (must be globally unique)
+  TableName:
+    Type: String
+    Default: Invoices
+  RegionParam:
+    Type: String
+    Default: us-east-1
+  Timezone:
+    Type: String
+    Default: America/Chicago
+    Description: IANA timezone (for daily batch "today")
+  DailyBatchCron:
+    Type: String
+    Default: cron(0 1 * * ? *) # 01:00 UTC daily
+    Description: EventBridge cron for daily batch (adjust to your needs)
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 120
+    MemorySize: 1536
+    Tracing: Active
+    Environment:
+      Variables:
+        RAW_BUCKET: !Ref RawBucketName
+        PROCESSED_BUCKET: !Ref ProcessedBucketName
+        DDB_TABLE: !Ref TableName
+        TIMEZONE: !Ref Timezone
+        USE_LLM: "true"                       # <-- turn on GenAI path
+        BEDROCK_MODEL_ID: "anthropic.claude-3-haiku-20240307"  # or "meta.llama3-70b-instruct-v1:0"
+        BEDROCK_REGION: !Ref RegionParam      # usually the same as stack region
+
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref RawBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: { Status: Enabled }
+
+  ProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ProcessedBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: { Status: Enabled }
+
+  InvoicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: invoice_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: invoice_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  InvoiceProcessorFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: s3_trigger/handler.handler
+      Policies:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - S3ReadPolicy: { BucketName: !Ref RawBucketName }
+        - S3WritePolicy: { BucketName: !Ref ProcessedBucketName }
+        - DynamoDBCrudPolicy: { TableName: !Ref TableName }
+        - Statement:
+            Effect: Allow
+            Action: [ "textract:AnalyzeExpense" ]
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource: "*"
+      Events:
+        RawUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawBucket
+            Events: s3:ObjectCreated:*
+
+  DailyBatchFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: daily_batch/handler.handler
+      Policies:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - S3ReadPolicy: { BucketName: !Ref RawBucketName }
+        - S3WritePolicy: { BucketName: !Ref ProcessedBucketName }
+        - DynamoDBCrudPolicy: { TableName: !Ref TableName }
+        - Statement:
+            Effect: Allow
+            Action: [ "textract:AnalyzeExpense" ]
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource: "*"
+
+  DailyBatchRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: !Ref DailyBatchCron
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DailyBatchFn.Arn
+          Id: DailyBatchFnTarget
+
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DailyBatchFn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyBatchRule.Arn
