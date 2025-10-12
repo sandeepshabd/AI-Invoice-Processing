@@ -1,0 +1,6 @@
+See what failed:
+aws cloudformation describe-stack-events \
+  --stack-name invoice-phase2-prod 
+  --region us-east-1 --profile demo \
+  --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].[Timestamp,LogicalResourceId,ResourceType,ResourceStatusReason]' \
+  --output table

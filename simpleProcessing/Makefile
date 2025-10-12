@@ -79,3 +79,7 @@ invoke-batch:
 	  --query 'StackResourceDetail.PhysicalResourceId' --output text)" \
 	  --log-type Tail /tmp/out.json --region "$(REGION)" --profile "$(PROFILE)" \
 	  --query 'LogResult' --output text | base64 --decode; echo; cat /tmp/out.json
+
+
+
+

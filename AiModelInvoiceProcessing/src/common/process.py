@@ -3,7 +3,8 @@ import os, json, hashlib, boto3
 
 # src/common/process.py  (ADD these imports)
 from .normalize import normalize_invoice
-USE_LLM = os.getenv("USE_LLM","false").lower() in ("1","true","yes")
+from .config import USE_LLM
+
 
 RAW_BUCKET = os.environ["RAW_BUCKET"]
 PROCESSED_BUCKET = os.environ["PROCESSED_BUCKET"]
@@ -70,7 +71,7 @@ def process_one_object(bucket: str, key: str) -> dict:
         "totals": (llm_norm or {}).get("totals") or {},
         "llm_present": bool(llm_norm),
         "source_parse": parsed,
-        "llm_normalized": llm_norm or {}
+        "llm_normalized": llm_norm if USE_LLM else None
     })
 
     return {"invoice_id": inv_id, "processed_key": out_key, "parsed": parsed, "llm": llm_norm}

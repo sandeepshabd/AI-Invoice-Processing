@@ -1,10 +1,11 @@
 # src/common/prompt.py
+import json
+
 SYSTEM = (
   "You are a strict, deterministic invoice-normalization engine. "
   "Always output ONLY minified JSON matching the schema. No prose."
 )
 
-# Few-shot examples keep it compact; show EUR + USD
 FEW_SHOTS = [
   {
     "input_schema_note": "Textract expense JSON (truncated) and a rough parsed dict",
@@ -16,10 +17,11 @@ FEW_SHOTS = [
       "totals": {"subtotal": "76.80", "tax":"15.36", "total":"92.16"},
       "line_items":[{"description":"Ramette A4 (500 feuilles)","qty":"6","unit_price":"6.40","amount":"38.40"}],
       "confidence":{"structure":"0.88","vendor":"0.90","totals":"0.86","lines":"0.84"},
-      "validations":{"sum_matches_total": true}
+      "validations":{"sum_matches_total": True}
     }
   },
   {
+    "input_schema_note": "Another invoice example in USD", 
     "textract_hint": {"SummaryFields":[{"Type":{"Text":"VENDOR_NAME"},"ValueDetection":{"Text":"Alpha Supplies Inc."}}]},
     "deterministic_parse": {"vendor":"Alpha Supplies Inc.","currency":"USD"},
     "output": {
@@ -32,21 +34,34 @@ FEW_SHOTS = [
         {"description":"Stapler Set","qty":"1","unit_price":"12.50","amount":"12.50"}
       ],
       "confidence":{"structure":"0.92","vendor":"0.93","totals":"0.90","lines":"0.91"},
-      "validations":{"sum_matches_total": true}
+      "validations":{"sum_matches_total": True}
     }
   }
 ]
 
-# “Schema-first” instruction (the guardrail)
-SCHEMA_TEXT = """
-TARGET_JSON_SCHEMA (all values strings unless boolean noted):
+# Programmatic schema (valid Python dict). 
+SCHEMA = {
+  "vendor": {"name": "", "country_hint": ""},
+  "invoice": {"number": "", "date_iso": "YYYY-MM-DD", "currency": ""},
+  "totals": {"subtotal": "", "tax": "", "total": ""},
+  "line_items": [{"description": "", "qty": "", "unit_price": "", "amount": ""}],
+  "confidence": {"structure": "", "vendor": "", "totals": "", "lines": ""},
+  "validations": {"sum_matches_total": False}
+}
+
+# Minified JSON string version of SCHEMA 
+SCHEMA_TEXT = json.dumps(SCHEMA, separators=(",", ":"), ensure_ascii=False)
+
+
+SCHEMA_PROMPT = """
+TARGET_JSON_SCHEMA (all values strings unless noted):
 {
-  "vendor": {"name":"", "country_hint":""},
-  "invoice": {"number":"", "date_iso":"YYYY-MM-DD", "currency":""},
-  "totals": {"subtotal":"", "tax":"", "total":""},
-  "line_items": [{"description":"", "qty":"", "unit_price":"", "amount":""}],
-  "confidence": {"structure":"0.0-1.0", "vendor":"0.0-1.0", "totals":"0.0-1.0", "lines":"0.0-1.0"},
-  "validations": {"sum_matches_total": true|false}
+  "vendor":{"name":"","country_hint":""},
+  "invoice":{"number":"","date_iso":"YYYY-MM-DD","currency":""},
+  "totals":{"subtotal":"","tax":"","total":""},
+  "line_items":[{"description":"","qty":"","unit_price":"","amount":""}],
+  "confidence":{"structure":"0.0-1.0","vendor":"0.0-1.0","totals":"0.0-1.0","lines":"0.0-1.0"},
+  "validations":{"sum_matches_total": true}
 }
 Hard rules:
 - Output ONLY minified JSON that validates against this shape.
@@ -55,4 +70,4 @@ Hard rules:
 - If any field unknown, use empty string (not null).
 - If sum(line_items.amount) ~ totals.total (+/- 1%), set sum_matches_total=true else false.
 - Never include explanations or markdown, just JSON.
-"""
+""".strip()

@@ -7,6 +7,7 @@ s3_prefix = "invoice-phase1-prod"
 region = "us-east-1"
 profile = "demo"
 confirm_changeset = true
+disable_rollback = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "RawBucketName=\"invoices-raw--sandeepsingh-2025-10-04\" ProcessedBucketName=\"invoice-processed--sandeepsingh-2025-10-04\" TableName=\"Invoices\" RegionParam=\"us-east-1\" Timezone=\"America/Chicago\" DailyBatchCron=\"cron(0 1 * * ? *)\""
+parameter_overrides = "RawBucketName=\"invoices-raw--sandeepsingh-2025-10-05\" ProcessedBucketName=\"invoices-processed--sandeepsingh-2025-10-08\" TableName=\"Invoices\" RegionParam=\"us-east-1\" Timezone=\"America/Chicago\" DailyBatchCron=\"cron(0 1 * * ? *)\""
 image_repositories = []

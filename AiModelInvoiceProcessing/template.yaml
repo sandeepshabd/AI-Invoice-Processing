@@ -37,8 +37,8 @@ Globals:
         DDB_TABLE: !Ref TableName
         TIMEZONE: !Ref Timezone
         USE_LLM: "true"                       # <-- turn on GenAI path
-        BEDROCK_MODEL_ID: "anthropic.claude-3-haiku-20240307"  # or "meta.llama3-70b-instruct-v1:0"
-        BEDROCK_REGION: !Ref RegionParam      # usually the same as stack region
+        BEDROCK_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"  # or "meta.llama3-70b-instruct-v1:0"
+        BEDROCK_REGION: !Ref RegionParam      
 
     LoggingConfig:
       LogFormat: JSON
@@ -56,8 +56,16 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      VersioningConfiguration: { Status: Enabled }
-
+      VersioningConfiguration: { Status: Suspended } # suspended for demo
+      LifecycleConfiguration:
+        Rules:
+          - Id: cleanup-delete-markers
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+          - Id: abort-mpus
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
   ProcessedBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -70,7 +78,16 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      VersioningConfiguration: { Status: Enabled }
+      VersioningConfiguration: { Status: Suspended }
+      LifecycleConfiguration:
+        Rules:
+          - Id: cleanup-delete-markers
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+          - Id: abort-mpus
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
   InvoicesTable:
     Type: AWS::DynamoDB::Table

@@ -1,7 +1,8 @@
 # src/common/normalize.py
 import json, re, os
 from .llm_client import invoke_bedrock_claude, invoke_bedrock_llama
-from .prompt import SYSTEM, FEW_SHOTS, SCHEMA_TEXT
+from .prompt import SYSTEM, FEW_SHOTS, SCHEMA_TEXT, SCHEMA_PROMPT
+
 
 MODEL_ID = os.getenv("BEDROCK_MODEL_ID","anthropic.claude-3-haiku-20240307")
 
@@ -10,25 +11,32 @@ def _json_only(s: str) -> str:
     m = re.search(r"\{.*\}", s, flags=re.DOTALL)
     return m.group(0) if m else "{}"
 
-def build_messages(textract_raw: dict, deterministic_parse: dict) -> list[dict]:
-    shots = []
-    for ex in FEW_SHOTS:
-        shots.append({"role":"user", "content": json.dumps({
-            "note": ex["input_schema_note"],
-            "textract_hint": ex.get("textract_hint",{}),
-            "deterministic_parse": ex.get("deterministic_parse",{})
-        }, ensure_ascii=False)})
-        shots.append({"role":"assistant", "content": json.dumps(ex["output"], separators=(',',':'), ensure_ascii=False)})
 
-    user_payload = {
-      "instructions": "Normalize the invoice using the schema and rules.",
-      "schema": SCHEMA_TEXT,
-      "inputs": {
-        "textract_expense": textract_raw,
-        "deterministic_parse": deterministic_parse
-      }
-    }
-    return [{"role":"system","content":SYSTEM}, *shots, {"role":"user","content":json.dumps(user_payload, ensure_ascii=False)}]
+def build_messages(textract_raw: dict, deterministic_parse: dict):
+    msgs = [{"role": "system", "content": SYSTEM}]
+
+
+    for ex in FEW_SHOTS:
+        note = ex.get("input_schema_note", "Few-shot example")
+        tex_hint = json.dumps(ex.get("textract_hint", {}), separators=(",", ":"))
+        det = json.dumps(ex.get("deterministic_parse", {}), separators=(",", ":"))
+        out = json.dumps(ex.get("output", {}), separators=(",", ":"))
+
+        msgs.append({
+            "role": "user",
+            "content": f"{note}\nTEXTRACT={tex_hint}\nPARSE={det}\nSCHEMA={SCHEMA_TEXT}\n{SCHEMA_PROMPT}"
+        })
+        msgs.append({"role": "assistant", "content": out})
+
+    # current input
+    tex = json.dumps(textract_raw or {}, separators=(",", ":"))
+    det = json.dumps(deterministic_parse or {}, separators=(",", ":"))
+    msgs.append({
+        "role": "user",
+        "content": f"TEXTRACT={tex}\nPARSE={det}\nSCHEMA={SCHEMA_TEXT}\n{SCHEMA_PROMPT}"
+    })
+    return msgs
+
 
 def normalize_invoice(textract_raw: dict, deterministic_parse: dict) -> dict:
     # Build prompt
