@@ -1,4 +1,4 @@
-# common/config.py
+# src/common/config.py
 import os
 
 def _get_bool(name: str, default: str = "false") -> bool:
@@ -6,7 +6,8 @@ def _get_bool(name: str, default: str = "false") -> bool:
 
 USE_LLM = _get_bool("USE_LLM", "false")
 
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307")
+
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 BEDROCK_REGION   = os.getenv("BEDROCK_REGION", os.getenv("AWS_REGION", "us-east-1"))
 
 RAW_BUCKET       = os.getenv("RAW_BUCKET")

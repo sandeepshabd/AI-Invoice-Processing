@@ -4,3 +4,11 @@ aws cloudformation describe-stack-events \
   --region us-east-1 --profile demo \
   --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].[Timestamp,LogicalResourceId,ResourceType,ResourceStatusReason]' \
   --output table
+
+make destroy
+make seed
+make invoke-batch
+make print-local
+
+
+

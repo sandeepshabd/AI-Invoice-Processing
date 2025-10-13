@@ -265,4 +265,77 @@ invoke-batch:
 
 .PHONY: validate-one
 validate-one:
-	python3 "tools/validate_genai.py" "fixtures/textract_officemart.json" "fixtures/deterministic_officemart.json"
+	PYTHONPATH="$$(pwd)" USE_LLM=false \
+	python3 "tools/validate_genai.py" \
+	  "fixtures/textract_officemart.json" \
+	  "fixtures/deterministic_officemart.json"
+
+# --- Metrics / Scoring ---
+score-today:
+	$(eval REGION := $(shell sed -n 's/region = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROFILE := $(shell sed -n 's/profile = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval STACK := $(shell sed -n 's/stack_name = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROC := $(shell aws lambda get-function-configuration --function-name $$(aws cloudformation describe-stack-resource --stack-name "$(STACK)" --logical-resource-id DailyBatchFn --region "$(REGION)" --profile "$(PROFILE)" --query 'StackResourceDetail.PhysicalResourceId' --output text) --region "$(REGION)" --profile "$(PROFILE)" --query 'Environment.Variables.PROCESSED_BUCKET' --output text))
+	@echo "Scoring today on ProcessedBucket=$(PROC)"
+	@AWS_REGION="$(REGION)" PROCESSED_BUCKET="$(PROC)" TIMEZONE="$(TIMEZONE)" \
+	  python3 tools/score_day.py
+
+# Example: score a specific date (YYYY-MM-DD)
+score-date:
+	@if [ -z "$$DATE" ]; then echo "Usage: make score-date DATE=YYYY-MM-DD"; exit 2; fi
+	$(eval REGION := $(shell sed -n 's/region = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROFILE := $(shell sed -n 's/profile = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval STACK := $(shell sed -n 's/stack_name = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROC := $(shell aws lambda get-function-configuration --function-name $$(aws cloudformation describe-stack-resource --stack-name "$(STACK)" --logical-resource-id DailyBatchFn --region "$(REGION)" --profile "$(PROFILE)" --query 'StackResourceDetail.PhysicalResourceId' --output text) --region "$(REGION)" --profile "$(PROFILE)" --query 'Environment.Variables.PROCESSED_BUCKET' --output text))
+	@echo "Scoring $(DATE) on ProcessedBucket=$(PROC)"
+	@AWS_REGION="$(REGION)" PROCESSED_BUCKET="$(PROC)" TIMEZONE="$(TIMEZONE)" \
+	  python3 tools/score_day.py "$(DATE)"
+
+# --- HTML report ---
+report-today:
+	$(eval REGION := $(shell sed -n 's/region = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROFILE := $(shell sed -n 's/profile = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval STACK := $(shell sed -n 's/stack_name = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval FN := $(shell aws cloudformation describe-stack-resource --stack-name "$(STACK)" --logical-resource-id DailyBatchFn --region "$(REGION)" --profile "$(PROFILE)" --query 'StackResourceDetail.PhysicalResourceId' --output text))
+	$(eval PROC := $(shell aws lambda get-function-configuration --function-name "$(FN)" --region "$(REGION)" --profile "$(PROFILE)" --query 'Environment.Variables.PROCESSED_BUCKET' --output text))
+	@echo "Rendering report for today on ProcessedBucket=$(PROC)"
+	@AWS_REGION="$(REGION)" PROCESSED_BUCKET="$(PROC)" TIMEZONE="$(TIMEZONE)" \
+	  python3 tools/render_report.py
+
+report-date:
+	@if [ -z "$$DATE" ]; then echo "Usage: make report-date DATE=YYYY-MM-DD"; exit 2; fi
+	$(eval REGION := $(shell sed -n 's/region = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROFILE := $(shell sed -n 's/profile = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval STACK := $(shell sed -n 's/stack_name = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval FN := $(shell aws cloudformation describe-stack-resource --stack-name "$(STACK)" --logical-resource-id DailyBatchFn --region "$(REGION)" --profile "$(PROFILE)" --query 'StackResourceDetail.PhysicalResourceId' --output text))
+	$(eval PROC := $(shell aws lambda get-function-configuration --function-name "$(FN)" --region "$(REGION)" --profile "$(PROFILE)" --query 'Environment.Variables.PROCESSED_BUCKET' --output text))
+	@echo "Rendering report for $(DATE) on ProcessedBucket=$(PROC)"
+	@AWS_REGION="$(REGION)" PROCESSED_BUCKET="$(PROC)" TIMEZONE="$(TIMEZONE)" \
+	  python3 tools/render_report.py "$(DATE)"
+
+# Optional: get a 1-hour pre-signed URL to open the report in browser
+report-url:
+	@if [ -z "$$DATE" ]; then echo "Usage: make report-url DATE=YYYY-MM-DD"; exit 2; fi
+	$(eval REGION := $(shell sed -n 's/region = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval PROFILE := $(shell sed -n 's/profile = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval STACK := $(shell sed -n 's/stack_name = "\(.*\)"/\1/p' samconfig.toml | head -1))
+	$(eval FN := $(shell aws cloudformation describe-stack-resource --stack-name "$(STACK)" --logical-resource-id DailyBatchFn --region "$(REGION)" --profile "$(PROFILE)" --query 'StackResourceDetail.PhysicalResourceId' --output text))
+	$(eval PROC := $(shell aws lambda get-function-configuration --function-name "$(FN)" --region "$(REGION)" --profile "$(PROFILE)" --query 'Environment.Variables.PROCESSED_BUCKET' --output text))
+	# turn 2025-10-12 into 2025/10/12
+	$(eval DATE_SLASH := $(subst -,/,$(DATE)))
+	$(eval KEY := metrics/$(DATE_SLASH)/report.html)
+	@aws s3 presign "s3://$(PROC)/$(KEY)" --expires-in 3600 --region "$(REGION)" --profile "$(PROFILE)"
+
+
+print-resolved:
+	@echo "Region=$(REGION) Profile=$(PROFILE) Stack=$(STACK)"
+	@echo "RawBucket(stack)=$(RAW_BUCKET)"
+	@echo "ProcessedBucket(stack)=$(PROC_BUCKET)"
+
+# Print locally using the bucket from the Lambda env
+print-local:
+	$(eval FN := $(shell aws cloudformation describe-stack-resource --stack-name "$(STACK)" --logical-resource-id DailyBatchFn --region "$(REGION)" --profile "$(PROFILE)" --query 'StackResourceDetail.PhysicalResourceId' --output text))
+	$(eval PROC := $(shell aws lambda get-function-configuration --function-name "$(FN)" --region "$(REGION)" --profile "$(PROFILE)" --query 'Environment.Variables.PROCESSED_BUCKET' --output text))
+	@echo "Using ProcessedBucket=$(PROC)"
+	@AWS_REGION="$(REGION)" PROCESSED_BUCKET="$(PROC)" TIMEZONE="$(TIMEZONE)" \
+	  python3 tools/score_day.py --show-diffs
